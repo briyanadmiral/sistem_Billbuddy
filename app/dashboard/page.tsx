@@ -52,23 +52,25 @@ export default async function DashboardPage() {
     .limit(5) as { data: Activity[] | null }
 
   // Get settlements (debts)
+  // 1. Hutang yang harus kamu bayar (Mencari nama pemberi hutang/creditor)
   const { data: debtsOwed } = await supabase
     .from('settlements')
     .select(`
       *,
-      creditor:profiles!settlements_creditor_id_fkey(*)
+      creditor:profiles!creditor_id(full_name, avatar_url)
     `)
     .eq('debtor_id', user.id)
-    .eq('is_paid', false) as { data: (Settlement & { creditor: Profile })[] | null }
+    .eq('is_paid', false) as { data: any[] | null }
 
+  // 2. Piutang yang akan kamu terima (Mencari nama orang yang berhutang/debtor)
   const { data: debtsToReceive } = await supabase
     .from('settlements')
     .select(`
       *,
-      debtor:profiles!settlements_debtor_id_fkey(*)
+      debtor:profiles!debtor_id(full_name, avatar_url)
     `)
     .eq('creditor_id', user.id)
-    .eq('is_paid', false) as { data: (Settlement & { debtor: Profile })[] | null }
+    .eq('is_paid', false) as { data: any[] | null }
 
   const totalOwed = debtsOwed?.reduce((sum, d) => sum + Number(d.amount), 0) || 0
   const totalToReceive = debtsToReceive?.reduce((sum, d) => sum + Number(d.amount), 0) || 0

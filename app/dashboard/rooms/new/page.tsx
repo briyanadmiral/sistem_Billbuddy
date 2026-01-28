@@ -28,7 +28,7 @@ export default function NewRoomPage() {
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      
+
       if (!user) {
         setError('Anda harus login terlebih dahulu')
         setLoading(false)
@@ -64,10 +64,14 @@ export default function NewRoomPage() {
 
       router.push(`/dashboard/rooms/${room.id}`)
       router.refresh()
-    } catch (err) {
-      console.error(err)
-      setError('Gagal membuat room. Silakan coba lagi.')
-      setLoading(false)
+    } catch (err: any) {
+      // Kita bongkar isi error-nya di sini
+      console.error("ALASAN ERROR:", err.message || err);
+      if (err.details) console.error("DETAIL:", err.details);
+      if (err.hint) console.error("HINT:", err.hint);
+
+      setError(err.message || 'Gagal membuat room. Silakan coba lagi.');
+      setLoading(false);
     }
   }
 
