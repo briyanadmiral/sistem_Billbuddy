@@ -1,308 +1,260 @@
-import Link from 'next/link'
-import { createClient } from '@/lib/supabase/server'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { formatCurrency } from '@/lib/bill-utils'
-import { UserAvatar } from '@/components/user-avatar'
-import { Plus, Users, Receipt, ArrowRight, TrendingUp, TrendingDown, Wallet } from 'lucide-react'
-import type { Profile, Room, Activity, Settlement } from '@/lib/types'
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Plus,
+  Wallet,
+  Receipt,
+  ArrowUpRight,
+  ArrowDownLeft,
+  ArrowRight,
+  LogIn,
+} from "lucide-react";
+import { formatCurrency } from "@/lib/bill-utils";
+import { UserAvatar } from "@/components/user-avatar";
+import { JoinRoomForm } from "@/components/join-room-form";
+
+export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
-  
-  const { data: { user } } = await supabase.auth.getUser()
-  
-  if (!user) return null
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
+  if (!user) {
+    return <div className="p-8">Silakan login terlebih dahulu.</div>;
+  }
+
+  // 1. Ambil Profil User
   const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single()
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .single();
 
-  // Get user's rooms
-  const { data: roomMemberships } = await supabase
-    .from('room_members')
-    .select('room_id')
-    .eq('user_id', user.id)
+  // 2. Ambil Statistik: Room & Activities
+  const { data: myRooms } = await supabase
+    .from("room_members")
+    .select(
+      `
+      room:rooms (
+        id, name, host:profiles(*)
+      )
+    `,
+    )
+    .eq("user_id", user.id)
+    .order("joined_at", { ascending: false });
 
-  const roomIds = roomMemberships?.map(rm => rm.room_id) || []
-
-  // Get rooms with host info
-  const { data: rooms } = await supabase
-    .from('rooms')
-    .select(`
+  // Ambil Activity Terbaru (Limit 5)
+  const { data: recentActivities } = await supabase
+    .from("activities")
+    .select(
+      `
       *,
-      host:profiles!rooms_host_id_fkey(*)
-    `)
-    .in('id', roomIds.length > 0 ? roomIds : ['00000000-0000-0000-0000-000000000000'])
-    .eq('is_active', true)
-    .order('updated_at', { ascending: false })
-    .limit(5) as { data: Room[] | null }
+      payer:profiles(*)
+    `,
+    )
+    .in("room_id", myRooms?.map((m: any) => m.room.id) || [])
+    .order("created_at", { ascending: false })
+    .limit(5);
 
-  // Get recent activities
-  const { data: activities } = await supabase
-    .from('activities')
-    .select(`
-      *,
-      payer:profiles!activities_payer_id_fkey(*)
-    `)
-    .in('room_id', roomIds.length > 0 ? roomIds : ['00000000-0000-0000-0000-000000000000'])
-    .order('created_at', { ascending: false })
-    .limit(5) as { data: Activity[] | null }
+  // 3. Hitung Statistik Sederhana
+  const totalRooms = myRooms?.length || 0;
 
-  // Get settlements (debts)
-  // 1. Hutang yang harus kamu bayar (Mencari nama pemberi hutang/creditor)
-  const { data: debtsOwed } = await supabase
-    .from('settlements')
-    .select(`
-      *,
-      creditor:profiles!creditor_id(full_name, avatar_url)
-    `)
-    .eq('debtor_id', user.id)
-    .eq('is_paid', false) as { data: any[] | null }
+  // Hitung total activity (fetch count only)
+  const { count: totalActivities } = await supabase
+    .from("activities")
+    .select("id", { count: "exact", head: true })
+    .in("room_id", myRooms?.map((m: any) => m.room.id) || []);
 
-  // 2. Piutang yang akan kamu terima (Mencari nama orang yang berhutang/debtor)
-  const { data: debtsToReceive } = await supabase
-    .from('settlements')
-    .select(`
-      *,
-      debtor:profiles!debtor_id(full_name, avatar_url)
-    `)
-    .eq('creditor_id', user.id)
-    .eq('is_paid', false) as { data: any[] | null }
+  // --- STATISTIK KARTU (Dummy Calculation untuk Hutang/Piutang) ---
+  // Di real app, ini harus hitung dari tabel settlements/splits
+  // Untuk sekarang kita set 0 dulu sesuai screenshot atau logika sederhana
+  const harusBayar = 0;
+  const akanDiterima = 0;
 
-  const totalOwed = debtsOwed?.reduce((sum, d) => sum + Number(d.amount), 0) || 0
-  const totalToReceive = debtsToReceive?.reduce((sum, d) => sum + Number(d.amount), 0) || 0
+  const firstName = profile?.full_name?.split(" ")[0] || "User";
 
   return (
-    <div className="space-y-8">
-      {/* Welcome Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-8 pb-20">
+      {/* --- HEADER --- */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">
-            Halo, {profile?.full_name?.split(' ')[0] || 'User'}!
+          <h1 className="text-3xl font-bold tracking-tight">
+            Halo, {firstName}!
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-muted-foreground">
             Kelola pengeluaran bersama dengan mudah
           </p>
         </div>
-        <div className="flex gap-3">
-          <Button asChild className="bg-gradient-to-r from-primary to-secondary hover:opacity-90">
+        <div className="flex items-center gap-2">
+          <JoinRoomForm />
+          <Button
+            asChild
+            className="bg-gradient-to-r from-primary to-secondary text-white shadow-md"
+          >
             <Link href="/dashboard/rooms/new">
-              <Plus className="h-4 w-4 mr-2" />
-              Room Baru
+              <Plus className="mr-2 h-4 w-4" /> Room Baru
             </Link>
           </Button>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-primary/10 to-primary/5">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Rooms</p>
-                <p className="text-3xl font-bold text-primary">{rooms?.length || 0}</p>
-              </div>
-              <div className="p-3 bg-primary/20 rounded-xl">
-                <Users className="h-6 w-6 text-primary" />
-              </div>
+      {/* --- STATS CARDS --- */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {/* Card 1: Total Rooms */}
+        <Card className="bg-card text-card-foreground border-border shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Total Rooms
+            </CardTitle>
+            <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-full">
+              <Wallet className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalRooms}</div>
+          </CardContent>
+        </Card>
+
+        {/* Card 2: Total Activities */}
+        <Card className="bg-card text-card-foreground border-border shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Total Activities
+            </CardTitle>
+            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-full">
+              <Receipt className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalActivities || 0}</div>
+          </CardContent>
+        </Card>
+
+        {/* Card 3: Harus Bayar */}
+        <Card className="bg-card text-card-foreground border-border shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Harus Bayar
+            </CardTitle>
+            <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
+              <ArrowUpRight className="h-4 w-4 text-red-600 dark:text-red-400" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+              {formatCurrency(harusBayar)}
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-secondary/10 to-secondary/5">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Activities</p>
-                <p className="text-3xl font-bold text-secondary">{activities?.length || 0}</p>
-              </div>
-              <div className="p-3 bg-secondary/20 rounded-xl">
-                <Receipt className="h-6 w-6 text-secondary" />
-              </div>
+        {/* Card 4: Akan Diterima */}
+        <Card className="bg-card text-card-foreground border-border shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Akan Diterima
+            </CardTitle>
+            <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-full">
+              <ArrowDownLeft className="h-4 w-4 text-green-600 dark:text-green-400" />
             </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-coral/10 to-coral/5">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Harus Bayar</p>
-                <p className="text-2xl font-bold text-coral">{formatCurrency(totalOwed)}</p>
-              </div>
-              <div className="p-3 bg-coral/20 rounded-xl">
-                <TrendingDown className="h-6 w-6 text-coral" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-teal/10 to-teal/5">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Akan Diterima</p>
-                <p className="text-2xl font-bold text-teal">{formatCurrency(totalToReceive)}</p>
-              </div>
-              <div className="p-3 bg-teal/20 rounded-xl">
-                <TrendingUp className="h-6 w-6 text-teal" />
-              </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+              {formatCurrency(akanDiterima)}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Rooms */}
-        <Card className="border-0 shadow-lg">
-          <CardHeader className="flex flex-row items-center justify-between pb-4">
-            <div>
-              <CardTitle className="text-lg">Rooms Terbaru</CardTitle>
-              <CardDescription>Room yang baru kamu akses</CardDescription>
-            </div>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/dashboard/rooms" className="text-primary">
-                Lihat Semua
-                <ArrowRight className="h-4 w-4 ml-1" />
-              </Link>
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {rooms && rooms.length > 0 ? (
-              rooms.map((room) => (
-                <Link key={room.id} href={`/dashboard/rooms/${room.id}`}>
-                  <div className="flex items-center gap-4 p-4 rounded-xl hover:bg-muted/50 transition-colors group">
-                    <div className="p-3 bg-gradient-to-br from-primary to-secondary rounded-xl group-hover:scale-105 transition-transform">
-                      <Users className="h-5 w-5 text-primary-foreground" />
+      {/* --- SECTIONS TERBARU --- */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+        {/* ROOMS TERBARU (Kiri - Lebar 4) */}
+        <div className="col-span-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold tracking-tight">Rooms Terbaru</h2>
+            <Link
+              href="/dashboard/rooms"
+              className="text-sm text-primary hover:underline"
+            >
+              Lihat Semua &rarr;
+            </Link>
+          </div>
+
+          <div className="space-y-4">
+            {myRooms && myRooms.length > 0 ? (
+              myRooms.slice(0, 3).map((item: any) => (
+                <Link
+                  key={item.room.id}
+                  href={`/dashboard/rooms/${item.room.id}`}
+                >
+                  <div className="flex items-center justify-between p-4 rounded-xl border bg-card hover:bg-muted/50 transition-colors shadow-sm">
+                    <div className="flex items-center gap-4">
+                      <UserAvatar profile={item.room.host} />
+                      <div>
+                        <p className="font-semibold">{item.room.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Host: {item.room.host?.full_name?.split(" ")[0]}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-foreground truncate">{room.name}</p>
-                      <p className="text-sm text-muted-foreground truncate">
-                        Host: {room.host?.full_name || 'Unknown'}
-                      </p>
-                    </div>
-                    <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
                   </div>
                 </Link>
               ))
             ) : (
-              <div className="text-center py-8">
-                <div className="mx-auto p-4 bg-muted rounded-full w-fit mb-4">
-                  <Users className="h-8 w-8 text-muted-foreground" />
-                </div>
-                <p className="text-muted-foreground">Belum ada room</p>
-                <Button asChild variant="link" className="mt-2">
-                  <Link href="/dashboard/rooms/new">Buat Room Baru</Link>
-                </Button>
+              <div className="p-8 text-center border rounded-xl bg-muted/10">
+                <p className="text-muted-foreground">Belum ada room.</p>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        {/* Recent Activities */}
-        <Card className="border-0 shadow-lg">
-          <CardHeader className="flex flex-row items-center justify-between pb-4">
-            <div>
-              <CardTitle className="text-lg">Activities Terbaru</CardTitle>
-              <CardDescription>Transaksi terakhir di semua room</CardDescription>
-            </div>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/dashboard/activities" className="text-primary">
-                Lihat Semua
-                <ArrowRight className="h-4 w-4 ml-1" />
-              </Link>
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {activities && activities.length > 0 ? (
-              activities.map((activity) => (
-                <div key={activity.id} className="flex items-center gap-4 p-4 rounded-xl hover:bg-muted/50 transition-colors">
-                  <UserAvatar profile={activity.payer || null} size="md" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-foreground truncate">{activity.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      Dibayar oleh {activity.payer?.full_name || 'Unknown'}
-                    </p>
+        {/* ACTIVITIES TERBARU (Kanan - Lebar 3) */}
+        <div className="col-span-3 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold tracking-tight">
+              Activities Terbaru
+            </h2>
+            <Link
+              href="/dashboard/activities"
+              className="text-sm text-primary hover:underline"
+            >
+              Lihat Semua &rarr;
+            </Link>
+          </div>
+
+          <div className="space-y-4">
+            {recentActivities && recentActivities.length > 0 ? (
+              recentActivities.map((act: any) => (
+                <div
+                  key={act.id}
+                  className="flex items-center justify-between p-4 rounded-xl border bg-card shadow-sm"
+                >
+                  <div className="flex items-center gap-3">
+                    <UserAvatar profile={act.payer} size="sm" />
+                    <div>
+                      <p className="font-medium line-clamp-1">{act.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Dibayar: {act.payer?.full_name?.split(" ")[0]}
+                      </p>
+                    </div>
                   </div>
-                  <p className="font-bold text-primary">{formatCurrency(Number(activity.total_amount))}</p>
+                  <p className="font-bold text-primary text-sm">
+                    {formatCurrency(Number(act.total_amount))}
+                  </p>
                 </div>
               ))
             ) : (
-              <div className="text-center py-8">
-                <div className="mx-auto p-4 bg-muted rounded-full w-fit mb-4">
-                  <Receipt className="h-8 w-8 text-muted-foreground" />
-                </div>
-                <p className="text-muted-foreground">Belum ada activity</p>
+              <div className="p-8 text-center border rounded-xl bg-muted/10">
+                <p className="text-muted-foreground">Belum ada aktivitas.</p>
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Debts Summary */}
-        <Card className="border-0 shadow-lg lg:col-span-2">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <div className="p-2 bg-gold/20 rounded-lg">
-                <Wallet className="h-5 w-5 text-gold" />
-              </div>
-              <div>
-                <CardTitle className="text-lg">Ringkasan Hutang</CardTitle>
-                <CardDescription>Status hutang piutang kamu</CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Debts to Pay */}
-              <div className="space-y-3">
-                <h3 className="font-semibold text-coral flex items-center gap-2">
-                  <TrendingDown className="h-4 w-4" />
-                  Harus Dibayar
-                </h3>
-                {debtsOwed && debtsOwed.length > 0 ? (
-                  debtsOwed.slice(0, 3).map((debt) => (
-                    <div key={debt.id} className="flex items-center gap-3 p-3 bg-coral/5 rounded-xl">
-                      <UserAvatar profile={debt.creditor} size="sm" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{debt.creditor.full_name}</p>
-                      </div>
-                      <p className="font-bold text-coral">{formatCurrency(Number(debt.amount))}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-muted-foreground text-sm py-4 text-center">Tidak ada hutang</p>
-                )}
-              </div>
-
-              {/* Debts to Receive */}
-              <div className="space-y-3">
-                <h3 className="font-semibold text-teal flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4" />
-                  Akan Diterima
-                </h3>
-                {debtsToReceive && debtsToReceive.length > 0 ? (
-                  debtsToReceive.slice(0, 3).map((debt) => (
-                    <div key={debt.id} className="flex items-center gap-3 p-3 bg-teal/5 rounded-xl">
-                      <UserAvatar profile={debt.debtor} size="sm" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{debt.debtor.full_name}</p>
-                      </div>
-                      <p className="font-bold text-teal">{formatCurrency(Number(debt.amount))}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-muted-foreground text-sm py-4 text-center">Tidak ada piutang</p>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </div>
-  )
+  );
 }

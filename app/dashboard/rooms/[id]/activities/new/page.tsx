@@ -1,434 +1,331 @@
-'use client'
+"use client";
 
-import React from "react"
+import { useEffect, useState, use } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { UserAvatar } from "@/components/user-avatar";
+import { ArrowLeft, Loader2, Users, Receipt } from "lucide-react";
+import Link from "next/link";
+import { formatCurrency } from "@/lib/bill-utils";
+// IMPORT TIPE ASLI DARI SINI
+import type { Profile } from "@/lib/types";
 
-import { useState, useCallback, use } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { useDropzone } from 'react-dropzone'
-import { createClient } from '@/lib/supabase/client'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { 
-  ArrowLeft, Camera, Upload, Plus, Trash2, 
-  Receipt, Loader2, Sparkles, X, ImageIcon
-} from 'lucide-react'
-import { formatCurrency } from '@/lib/bill-utils'
-import type { ParsedReceipt } from '@/lib/types'
+export default function NewActivityPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id: roomId } = use(params);
 
-interface NewActivityPageProps {
-  params: Promise<{ id: string }>
-}
+  const router = useRouter();
+  const supabase = createClient();
 
-interface ItemInput {
-  name: string
-  quantity: number
-  unit_price: number
-  total_price: number
-}
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
 
-export default function NewActivityPage({ params }: NewActivityPageProps) {
-  const { id: roomId } = use(params)
-  const [name, setName] = useState('')
-  const [items, setItems] = useState<ItemInput[]>([{ name: '', quantity: 1, unit_price: 0, total_price: 0 }])
-  const [tax, setTax] = useState(0)
-  const [serviceCharge, setServiceCharge] = useState(0)
-  const [discount, setDiscount] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [scanning, setScanning] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [previewImage, setPreviewImage] = useState<string | null>(null)
-  const router = useRouter()
-  const supabase = createClient()
+  // State Form
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("");
 
-  const subtotal = items.reduce((sum, item) => sum + item.total_price, 0)
-  const total = subtotal + tax + serviceCharge - discount
+  // Gunakan tipe Profile yang asli di sini
+  const [members, setMembers] = useState<Profile[]>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
 
-  const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    const file = acceptedFiles[0]
-    if (!file) return
-
-    // Create preview
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      setPreviewImage(e.target?.result as string)
-    }
-    reader.readAsDataURL(file)
-
-    // Scan with OCR
-    setScanning(true)
-    setError(null)
-
-    try {
-      const formData = new FormData()
-      formData.append('image', file)
-
-      const response = await fetch('/api/ocr', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to scan receipt')
-      }
-
-      const data: ParsedReceipt = await response.json()
-      
-      // Update form with scanned data
-      if (data.items && data.items.length > 0) {
-        setItems(data.items.map(item => ({
-          name: item.name,
-          quantity: item.quantity || 1,
-          unit_price: item.unit_price || 0,
-          total_price: item.total_price || 0,
-        })))
-      }
-      if (data.tax) setTax(data.tax)
-      if (data.service_charge) setServiceCharge(data.service_charge)
-      if (data.discount) setDiscount(data.discount)
-    } catch (err) {
-      console.error(err)
-      setError('Gagal scan struk. Silakan input manual.')
-    } finally {
-      setScanning(false)
-    }
-  }, [])
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: {
-      'image/*': ['.png', '.jpg', '.jpeg', '.webp'],
-    },
-    maxFiles: 1,
-  })
-
-  function addItem() {
-    setItems([...items, { name: '', quantity: 1, unit_price: 0, total_price: 0 }])
-  }
-
-  function removeItem(index: number) {
-    setItems(items.filter((_, i) => i !== index))
-  }
-
-  function updateItem(index: number, field: keyof ItemInput, value: string | number) {
-    const newItems = [...items]
-    newItems[index] = { ...newItems[index], [field]: value }
-    
-    // Auto-calculate total price
-    if (field === 'quantity' || field === 'unit_price') {
-      newItems[index].total_price = newItems[index].quantity * newItems[index].unit_price
-    }
-    
-    setItems(newItems)
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setLoading(true)
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      
+  // 1. Fetch Data Member
+  useEffect(() => {
+    async function fetchData() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
-        setError('Anda harus login terlebih dahulu')
-        setLoading(false)
-        return
+        router.push("/login");
+        return;
       }
+      setCurrentUser(user.id);
 
-      // Create activity
-      const { data: activity, error: activityError } = await supabase
-        .from('activities')
+      const { data: memberData, error } = await supabase
+        .from("room_members")
+        .select(
+          `
+          user_id,
+          profile:profiles(*)
+        `,
+        )
+        .eq("room_id", roomId);
+
+      if (!error && memberData) {
+        // Ambil objek profile yang lengkap agar UserAvatar tidak error
+        const validProfiles = memberData
+          .map((m: any) =>
+            Array.isArray(m.profile) ? m.profile[0] : m.profile,
+          )
+          .filter((p: any) => p !== null) as Profile[];
+
+        setMembers(validProfiles);
+
+        // Default: Select All
+        setSelectedMemberIds(validProfiles.map((p) => p.id));
+      }
+      setLoading(false);
+    }
+    fetchData();
+  }, [roomId, router, supabase]);
+
+  // 2. Hitung Pembagian
+  const totalAmount = Number(amount) || 0;
+  const splitCount = selectedMemberIds.length;
+  const amountPerPerson = splitCount > 0 ? totalAmount / splitCount : 0;
+
+  // Logic Toggle Member
+  const toggleMember = (memberId: string) => {
+    setSelectedMemberIds((prev) =>
+      prev.includes(memberId)
+        ? prev.filter((id) => id !== memberId)
+        : [...prev, memberId],
+    );
+  };
+
+  // Logic Select All
+  const toggleSelectAll = () => {
+    if (selectedMemberIds.length === members.length) {
+      setSelectedMemberIds([]);
+    } else {
+      setSelectedMemberIds(members.map((m) => m.id));
+    }
+  };
+
+  // 3. Simpan Activity
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (
+      !name ||
+      totalAmount <= 0 ||
+      selectedMemberIds.length === 0 ||
+      !currentUser
+    ) {
+      alert("Mohon lengkapi data.");
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      // A. Activity Utama
+      const { data: activity, error: actError } = await supabase
+        .from("activities")
         .insert({
           room_id: roomId,
-          name,
-          payer_id: user.id,
-          subtotal,
-          tax_amount: tax,
-          service_charge: serviceCharge,
-          discount_amount: discount,
-          total_amount: total,
+          name: name,
+          total_amount: totalAmount,
+          payer_id: currentUser,
         })
         .select()
-        .single()
+        .single();
 
-      if (activityError) throw activityError
+      if (actError) throw actError;
 
-      // Create items
-      if (items.length > 0) {
-        const validItems = items.filter(item => item.name && item.total_price > 0)
-        if (validItems.length > 0) {
-          const { error: itemsError } = await supabase
-            .from('activity_items')
-            .insert(
-              validItems.map(item => ({
-                activity_id: activity.id,
-                name: item.name,
-                quantity: item.quantity,
-                unit_price: item.unit_price,
-                total_price: item.total_price,
-              }))
-            )
+      // B. Item Generic
+      const { data: item, error: itemError } = await supabase
+        .from("activity_items")
+        .insert({
+          activity_id: activity.id,
+          name: name,
+          price: totalAmount,
+          quantity: 1,
+        })
+        .select()
+        .single();
 
-          if (itemsError) throw itemsError
-        }
-      }
+      if (itemError) throw itemError;
 
-      router.push(`/dashboard/rooms/${roomId}/activities/${activity.id}`)
-      router.refresh()
-    } catch (err) {
-      console.error(err)
-      setError('Gagal membuat activity. Silakan coba lagi.')
-      setLoading(false)
+      // C. Splits (Hutang)
+      const splitsData = selectedMemberIds.map((memberId) => ({
+        item_id: item.id,
+        user_id: memberId,
+        share_amount: amountPerPerson,
+        is_paid: memberId === currentUser, // Lunas jika diri sendiri
+      }));
+
+      const { error: splitError } = await supabase
+        .from("item_splits")
+        .insert(splitsData);
+
+      if (splitError) throw splitError;
+
+      router.refresh();
+      router.push(`/dashboard/rooms/${roomId}`);
+    } catch (error: any) {
+      console.error("Error:", error);
+      alert("Gagal menyimpan: " + error.message);
+    } finally {
+      setSubmitting(false);
     }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      {/* Back Button */}
-      <Button variant="ghost" asChild>
+    <div className="max-w-2xl mx-auto space-y-6 pb-20">
+      <Button
+        variant="ghost"
+        asChild
+        className="pl-0 hover:pl-2 transition-all"
+      >
         <Link href={`/dashboard/rooms/${roomId}`} className="gap-2">
-          <ArrowLeft className="h-4 w-4" />
-          Kembali
+          <ArrowLeft className="h-4 w-4" /> Batal & Kembali
         </Link>
       </Button>
 
-      <Card className="border-0 shadow-xl">
+      <Card className="border-none shadow-xl bg-gradient-to-b from-card to-muted/20">
         <CardHeader className="text-center pb-2">
-          <div className="mx-auto p-4 bg-gradient-to-br from-secondary to-teal rounded-2xl w-fit mb-4">
-            <Receipt className="h-8 w-8 text-primary-foreground" />
+          <div className="mx-auto w-16 h-16 bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg text-white">
+            <Receipt className="h-8 w-8" />
           </div>
-          <CardTitle className="text-2xl">Tambah Activity Baru</CardTitle>
+          <CardTitle className="text-2xl font-bold">
+            Catat Pengeluaran
+          </CardTitle>
           <CardDescription>
-            Scan struk atau input manual item-item pengeluaran
+            Masukkan detail dan pilih siapa yang ikut patungan.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Activity Name */}
-            <div className="space-y-2">
-              <Label htmlFor="name">Nama Activity</Label>
-              <Input
-                id="name"
-                placeholder="contoh: Makan Siang di Restoran ABC"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                className="h-12"
-              />
-            </div>
-
-            {/* Receipt Scanner */}
-            <div className="space-y-2">
-              <Label>Scan Struk (Opsional)</Label>
-              <div
-                {...getRootProps()}
-                className={`
-                  border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors
-                  ${isDragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/30 hover:border-primary/50'}
-                  ${scanning ? 'opacity-50 pointer-events-none' : ''}
-                `}
-              >
-                <input {...getInputProps()} />
-                {scanning ? (
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="p-3 bg-primary/10 rounded-full">
-                      <Loader2 className="h-8 w-8 text-primary animate-spin" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Scanning struk...</p>
-                      <p className="text-sm text-muted-foreground">Mohon tunggu sebentar</p>
-                    </div>
-                  </div>
-                ) : previewImage ? (
-                  <div className="space-y-3">
-                    <div className="relative inline-block">
-                      <img 
-                        src={previewImage || "/placeholder.svg"} 
-                        alt="Receipt preview" 
-                        className="max-h-32 rounded-lg mx-auto"
-                      />
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="destructive"
-                        className="absolute -top-2 -right-2 h-6 w-6"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setPreviewImage(null)
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Klik atau drop untuk ganti gambar
-                    </p>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="p-3 bg-muted rounded-full">
-                      <Camera className="h-8 w-8 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Drop gambar struk di sini</p>
-                      <p className="text-sm text-muted-foreground">
-                        atau klik untuk upload
-                      </p>
-                    </div>
-                  </div>
-                )}
+          <form onSubmit={handleSubmit} className="space-y-8">
+            {/* Form Input */}
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Untuk keperluan apa?</Label>
+                <Input
+                  id="name"
+                  placeholder="Contoh: Beli Bensin, Makan Siang"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  className="h-12 text-lg"
+                />
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Sparkles className="h-3 w-3" />
-                <span>AI akan membaca struk dan mengisi item otomatis</span>
+              <div className="space-y-2">
+                <Label htmlFor="amount">Berapa total biayanya?</Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-3 text-muted-foreground font-semibold">
+                    Rp
+                  </span>
+                  <Input
+                    id="amount"
+                    type="number"
+                    placeholder="0"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    required
+                    className="pl-10 h-12 text-lg font-mono"
+                  />
+                </div>
               </div>
             </div>
 
-            {/* Items */}
-            <div className="space-y-3">
+            {/* Pilih Member */}
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <Label>Item-item</Label>
-                <Button type="button" variant="outline" size="sm" onClick={addItem}>
-                  <Plus className="h-4 w-4 mr-1" />
-                  Tambah Item
+                <Label className="text-base font-semibold flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Pilih Anggota ({selectedMemberIds.length})
+                </Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={toggleSelectAll}
+                  className="text-primary hover:text-primary hover:bg-primary/10"
+                >
+                  {selectedMemberIds.length === members.length
+                    ? "Batal Pilih Semua"
+                    : "Pilih Semua"}
                 </Button>
               </div>
-              
-              <div className="space-y-3">
-                {items.map((item, index) => (
-                  <div 
-                    key={index} 
-                    className="grid grid-cols-12 gap-2 p-3 bg-muted/50 rounded-xl"
-                  >
-                    <div className="col-span-12 sm:col-span-5">
-                      <Input
-                        placeholder="Nama item"
-                        value={item.name}
-                        onChange={(e) => updateItem(index, 'name', e.target.value)}
-                      />
-                    </div>
-                    <div className="col-span-4 sm:col-span-2">
-                      <Input
-                        type="number"
-                        placeholder="Qty"
-                        min="1"
-                        value={item.quantity || ''}
-                        onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 1)}
-                      />
-                    </div>
-                    <div className="col-span-8 sm:col-span-3">
-                      <Input
-                        type="number"
-                        placeholder="Harga satuan"
-                        min="0"
-                        value={item.unit_price || ''}
-                        onChange={(e) => updateItem(index, 'unit_price', parseInt(e.target.value) || 0)}
-                      />
-                    </div>
-                    <div className="col-span-10 sm:col-span-1 flex items-center text-sm font-medium">
-                      {formatCurrency(item.total_price)}
-                    </div>
-                    <div className="col-span-2 sm:col-span-1 flex items-center justify-end">
-                      {items.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => removeItem(index)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
 
-            {/* Additional Charges */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="tax">Pajak (PB1)</Label>
-                <Input
-                  id="tax"
-                  type="number"
-                  min="0"
-                  value={tax || ''}
-                  onChange={(e) => setTax(parseInt(e.target.value) || 0)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="service">Service Charge</Label>
-                <Input
-                  id="service"
-                  type="number"
-                  min="0"
-                  value={serviceCharge || ''}
-                  onChange={(e) => setServiceCharge(parseInt(e.target.value) || 0)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="discount">Diskon</Label>
-                <Input
-                  id="discount"
-                  type="number"
-                  min="0"
-                  value={discount || ''}
-                  onChange={(e) => setDiscount(parseInt(e.target.value) || 0)}
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto p-1">
+                {members.map((member) => {
+                  const isSelected = selectedMemberIds.includes(member.id);
+                  return (
+                    <div
+                      key={member.id}
+                      onClick={() => toggleMember(member.id)}
+                      className={`
+                                        flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all
+                                        ${isSelected ? "border-primary bg-primary/5 shadow-sm" : "border-border hover:bg-muted/50"}
+                                    `}
+                    >
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={() => toggleMember(member.id)}
+                        className="pointer-events-none"
+                      />
+                      {/* UserAvatar sekarang aman karena tipe data 'member' sudah sesuai Profile */}
+                      <UserAvatar profile={member} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate text-sm">
+                          {member.full_name}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
             {/* Summary */}
-            <div className="p-4 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-xl space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Subtotal</span>
-                <span>{formatCurrency(subtotal)}</span>
+            <div className="bg-muted/50 rounded-xl p-4 border flex justify-between items-center">
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
+                  Estimasi Per Orang
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {formatCurrency(totalAmount)} ÷ {splitCount} orang
+                </p>
               </div>
-              {tax > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span>Pajak</span>
-                  <span>+{formatCurrency(tax)}</span>
-                </div>
-              )}
-              {serviceCharge > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span>Service</span>
-                  <span>+{formatCurrency(serviceCharge)}</span>
-                </div>
-              )}
-              {discount > 0 && (
-                <div className="flex justify-between text-sm text-teal">
-                  <span>Diskon</span>
-                  <span>-{formatCurrency(discount)}</span>
-                </div>
-              )}
-              <div className="flex justify-between font-bold text-lg pt-2 border-t border-border">
-                <span>Total</span>
-                <span className="text-primary">{formatCurrency(total)}</span>
+              <div className="text-right">
+                <p className="text-xl font-bold text-primary">
+                  {formatCurrency(amountPerPerson)}
+                </p>
               </div>
             </div>
 
-            {error && (
-              <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
-                <p className="text-sm text-destructive">{error}</p>
-              </div>
-            )}
-
             <Button
               type="submit"
-              className="w-full h-12 bg-gradient-to-r from-secondary to-teal hover:opacity-90"
-              disabled={loading || !name || total <= 0}
+              className="w-full h-12 text-base font-medium bg-gradient-to-r from-primary to-secondary hover:opacity-90 shadow-md"
+              disabled={
+                submitting || totalAmount <= 0 || selectedMemberIds.length === 0
+              }
             >
-              {loading ? 'Menyimpan...' : 'Simpan Activity'}
+              {submitting ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Menyimpan...
+                </>
+              ) : (
+                "Simpan Activity"
+              )}
             </Button>
           </form>
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }

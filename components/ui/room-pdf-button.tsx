@@ -1,11 +1,11 @@
 "use client";
 
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/bill-utils";
-import { MessageCircle, FileText, Share2, Copy } from "lucide-react";
+import { FileText } from "lucide-react";
 import type { Profile, PaymentAccount, Activity } from "@/lib/types";
 
+// Kita definisikan tipe data yang dibutuhkan
 interface DebtCalculation {
   debtorId: string;
   debtor: Profile;
@@ -14,70 +14,26 @@ interface DebtCalculation {
   amount: number;
 }
 
-// PERBAIKAN: Kita extend PaymentAccount agar TypeScript tahu ada data profile
+// Tipe khusus untuk Akun Bank yang ada Profilenya
 type PaymentAccountWithProfile = PaymentAccount & {
   profile?: Profile | null;
 };
 
-interface SettlementActionsProps {
+interface RoomPdfButtonProps {
   roomName: string;
   debts: DebtCalculation[];
-  paymentAccounts: PaymentAccountWithProfile[]; // Gunakan tipe yang sudah diperbaiki
+  paymentAccounts: PaymentAccountWithProfile[];
   activities: Activity[];
 }
 
-export function SettlementActions({
+export function RoomPdfButton({
   roomName,
   debts,
   paymentAccounts,
   activities,
-}: SettlementActionsProps) {
-  // --- 1. WA Generator ---
-  function generateWhatsAppMessage(): string {
-    let message = `*BillBuddy - ${roomName}*\n\n`;
-    message += `Ringkasan Penyelesaian:\n`;
-    message += `${"─".repeat(20)}\n\n`;
-
-    if (!debts || debts.length === 0) {
-      message += "Semua lunas! Tidak ada hutang.\n";
-    } else {
-      for (const debt of debts) {
-        const debtorName = debt.debtor?.full_name || "Member";
-        const creditorName = debt.creditor?.full_name || "Member";
-        const account = paymentAccounts.find(
-          (a) => a.user_id === debt.creditorId,
-        );
-
-        message += `${debtorName} ➡️ ${creditorName}\n`;
-        message += `Total: ${formatCurrency(debt.amount)}\n`;
-
-        if (account) {
-          message += `Transfer: ${account.bank_name} - ${account.account_number}\n`;
-        }
-        message += `\n`;
-      }
-    }
-
-    message += `${"─".repeat(20)}\n`;
-    message += `_Dibuat dengan BillBuddy_`;
-
-    return message;
-  }
-
-  function handleShareWhatsApp() {
-    const message = generateWhatsAppMessage();
-    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(url, "_blank");
-  }
-
-  function handleCopyText() {
-    const message = generateWhatsAppMessage();
-    navigator.clipboard.writeText(message);
-    alert("Ringkasan hutang berhasil disalin!");
-  }
-
-  // --- 2. PDF Export Logic ---
+}: RoomPdfButtonProps) {
   function handleExportPDF() {
+    // Hitung total pengeluaran
     const totalExpenses = activities.reduce(
       (sum, act) => sum + Number(act.total_amount),
       0,
@@ -233,41 +189,15 @@ export function SettlementActions({
     }
   }
 
+  // TAMPILAN: Hanya tombol kecil dengan style "outline" agar cocok di header
   return (
-    <Card className="border-0 shadow-xl bg-gradient-to-br from-card to-muted/20 mt-8">
-      <CardContent className="p-6">
-        <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-          <Share2 className="h-4 w-4 text-primary" />
-          Bagikan & Download Laporan
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Button
-            onClick={handleShareWhatsApp}
-            className="bg-[#25D366] hover:bg-[#128C7E] text-white h-12 shadow-sm"
-          >
-            <MessageCircle className="h-5 w-5 mr-2" />
-            Share WhatsApp
-          </Button>
-
-          <Button
-            onClick={handleCopyText}
-            variant="outline"
-            className="h-12 bg-background hover:bg-muted"
-          >
-            <Copy className="h-5 w-5 mr-2" />
-            Copy Text
-          </Button>
-
-          <Button
-            onClick={handleExportPDF}
-            variant="outline"
-            className="h-12 bg-background hover:bg-muted border-primary/20 hover:border-primary/50 text-primary"
-          >
-            <FileText className="h-5 w-5 mr-2" />
-            Download PDF
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+    <Button
+      variant="outline"
+      onClick={handleExportPDF}
+      className="bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
+    >
+      <FileText className="h-4 w-4 mr-2 text-primary" />
+      PDF
+    </Button>
   );
 }

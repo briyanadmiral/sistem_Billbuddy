@@ -1,35 +1,26 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Copy, Check } from 'lucide-react'
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Copy, Check } from "lucide-react";
 
-interface CopyInviteCodeProps {
-  inviteCode: string
-}
+export function CopyInviteCode({ inviteCode }: { inviteCode: string }) {
+  const [copied, setCopied] = useState(false);
 
-export function CopyInviteCode({ inviteCode }: CopyInviteCodeProps) {
-  const [copied, setCopied] = useState(false)
-
-  async function handleCopy() {
-    await navigator.clipboard.writeText(inviteCode)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
+  const handleCopy = () => {
+    navigator.clipboard.writeText(inviteCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
-    <Button variant="outline" onClick={handleCopy} className="gap-2 bg-transparent">
+    <Button variant="outline" onClick={handleCopy} className="gap-2">
       {copied ? (
-        <>
-          <Check className="h-4 w-4 text-teal" />
-          Copied!
-        </>
+        <Check className="h-4 w-4 text-green-500" />
       ) : (
-        <>
-          <Copy className="h-4 w-4" />
-          {inviteCode}
-        </>
+        <Copy className="h-4 w-4" />
       )}
+      {copied ? "Tersalin!" : `Kode: ${inviteCode}`}
     </Button>
-  )
+  );
 }
